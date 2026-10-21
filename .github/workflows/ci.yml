@@ -128,13 +128,25 @@ jobs:
         run: |
           curl --fail --silent http://127.0.0.1:8000/health/ready > /dev/null
           python3 - <<'PY'
-          import re, urllib.request
-          with urllib.request.urlopen('http://127.0.0.1:8000/login') as response:
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin, urlsplit
+          import urllib.request
+          base = 'http://127.0.0.1:8000'
+          class AssetLinks(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.links = []
+              def handle_starttag(self, tag, attrs):
+                  self.links.extend(value for key, value in attrs if key in {'src', 'href'} and value)
+          with urllib.request.urlopen(base + '/login') as response:
               assert response.status == 200
               html = response.read().decode()
-          assets = set(re.findall(r'(?:src|href)="(http://127\.0\.0\.1:8000/build/[^\"]+)"', html))
-          assert assets, 'Login must reference compiled assets'
+          parser = AssetLinks()
+          parser.feed(html)
+          assets = {urljoin(base, link) for link in parser.links if urlsplit(urljoin(base, link)).path.startswith('/build/')}
+          assert assets, f'Login must reference compiled assets; links: {parser.links!r}'
           for url in assets:
+              assert urlsplit(url).netloc == urlsplit(base).netloc, f'Unexpected asset origin: {url}'
               with urllib.request.urlopen(url) as response:
                   assert response.status == 200 and response.read()
           print(f'Login and {len(assets)} compiled assets passed')
