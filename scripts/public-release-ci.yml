@@ -87,9 +87,9 @@ jobs:
         run: |
           cp .env.example .env
           php artisan key:generate
+      - run: npm run build
       - run: npm run lint:check
       - run: npx vue-tsc --noEmit
-      - run: npm run build
       - run: node --test tests/*.test.mjs
       - run: python3 -B tests/Deployment/test_public_source_export.py
       - run: php artisan test --filter='^(?!.*Tracker)'
