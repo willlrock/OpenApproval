@@ -130,7 +130,7 @@ jobs:
           python3 - <<'PY'
           from html.parser import HTMLParser
           from urllib.parse import urljoin, urlsplit
-          import urllib.request
+          import socket, urllib.request
           base = 'http://127.0.0.1:8000'
           class AssetLinks(HTMLParser):
               def __init__(self):
@@ -149,6 +149,12 @@ jobs:
               assert urlsplit(url).netloc == urlsplit(base).netloc, f'Unexpected asset origin: {url}'
               with urllib.request.urlopen(url) as response:
                   assert response.status == 200 and response.read()
+          for separator in [' ', '  ']:
+              with socket.create_connection(('127.0.0.1', 8000), timeout=10) as connection:
+                  request = f'GET{separator}{base}/login HTTP/1.1\r\nHost: conflicting.example.test:8888\r\nConnection: close\r\n\r\n'
+                  connection.sendall(request.encode())
+                  status = connection.recv(4096).split(b'\r\n', 1)[0]
+                  assert status.split()[1] == b'400', status
           print(f'Login and {len(assets)} compiled assets passed')
           PY
           docker compose exec -T app php artisan db:seed --force
