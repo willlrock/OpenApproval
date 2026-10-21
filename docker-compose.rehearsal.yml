@@ -1,0 +1,17 @@
+# Use a separate project: docker compose -p teg-rehearsal -f docker-compose.yml -f docker-compose.rehearsal.yml ...
+# Runtime has no outbound network and no automatic jobs or migrations.
+services:
+  app:
+    container_name: teg-rehearsal-app
+    environment:
+      TEG_BACKGROUND_ENABLED: "false"
+      RUN_MIGRATIONS: "false"
+      TELEGRAM_TOKEN: ""
+      GOOGLE_SHEETS_SPREADSHEET_ID: ""
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost/up"]
+  postgres:
+    container_name: teg-rehearsal-postgres
+networks:
+  default:
+    internal: true

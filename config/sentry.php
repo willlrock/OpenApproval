@@ -1,0 +1,36 @@
+<?php
+
+return [
+    'dsn' => env('SENTRY_LARAVEL_DSN'),
+    'environment' => env('SENTRY_ENVIRONMENT', env('APP_ENV', 'production')),
+    'release' => env('SENTRY_RELEASE', env('APP_RELEASE')),
+    'send_default_pii' => false,
+    'data_collection' => [
+        'user_info' => false,
+        'cookies' => ['mode' => 'off'],
+        'http_headers' => ['request' => ['mode' => 'off'], 'response' => ['mode' => 'off']],
+        'http_bodies' => [],
+        'url_query_params' => ['mode' => 'off'],
+        'database_query_data' => false,
+        'queues' => false,
+        'stack_frame_variables' => false,
+        'frame_context_lines' => 0,
+    ],
+    'max_request_body_size' => 'none',
+    'max_value_length' => 16384,
+    'context_lines' => 0,
+    'max_breadcrumbs' => 0,
+    'before_send' => [App\Logging\ScrubSentryEvent::class, 'beforeSend'],
+    'traces_sample_rate' => 0.0,
+    'profiles_sample_rate' => 0.0,
+    'enable_logs' => false,
+    'enable_metrics' => false,
+    'http_timeout' => 2,
+    'http_connect_timeout' => 1,
+    'breadcrumbs' => [
+        'logs' => false, 'cache' => false, 'sql_queries' => false, 'sql_bindings' => false,
+        'queue_info' => false, 'command_info' => false, 'http_client_requests' => false,
+        'notifications' => false,
+    ],
+    'tracing' => ['default_integrations' => false],
+];

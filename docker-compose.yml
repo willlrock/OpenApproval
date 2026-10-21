@@ -1,0 +1,84 @@
+services:
+  app:
+    image: ${APP_IMAGE:-teg-approval:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: teg-app
+    restart: unless-stopped
+    stop_grace_period: 75m
+    env_file:
+      - .env
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8000}:80"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY:?Set a persistent APP_KEY before starting the app}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - APP_URL=${APP_URL:-http://localhost:8000}
+      - TRACKER_ENABLED=${TRACKER_ENABLED:-false}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE:-teg_bot}
+      - DB_USERNAME=${DB_USERNAME:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:?Set a strong DB_PASSWORD}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET}
+      - TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      - TELEGRAM_CHANNEL_INVITE_URL=${TELEGRAM_CHANNEL_INVITE_URL:-}
+      - QUEUE_CONNECTION=database
+      - SESSION_DRIVER=database
+      - SESSION_SECURE_COOKIE=${SESSION_SECURE_COOKIE:-false}
+      - CACHE_STORE=database
+      - LOG_CHANNEL=stack
+      - LOG_STACK=stderr,daily
+      - TEG_BACKGROUND_ENABLED=${TEG_BACKGROUND_ENABLED:-true}
+      - RUN_MIGRATIONS=${RUN_MIGRATIONS:-true}
+    volumes:
+      - app-storage:/var/www/html/storage/app/public
+      - app-private:/var/www/html/storage/app/private
+      - app-logs:/var/www/html/storage/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost/health/ready"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5m
+      retries: 3
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: postgres:16-bookworm
+    container_name: teg-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-teg_bot}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set a strong DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: ${POSTGRES_INITDB_ARGS:-}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-teg_bot}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  app-storage:
+  app-private:
+  app-logs:

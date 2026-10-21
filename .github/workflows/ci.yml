@@ -1,0 +1,149 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, intl, pdo_sqlite, zip, gd, bcmath
+          coverage: none
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Follow the quickstart on a fresh SQLite database
+        run: |
+          composer setup
+          php artisan db:seed
+          php artisan admin:bootstrap --phone=998900000001 --name="Demo administrator" > /dev/null
+          before=$(sha256sum .env database/database.sqlite)
+          if composer setup > storage/logs/repeated-setup.log 2>&1; then
+            echo "A repeated setup must refuse to replace an existing environment" >&2
+            exit 1
+          fi
+          test "$before" = "$(sha256sum .env database/database.sqlite)"
+      - name: Serve the new installation
+        run: |
+          php artisan serve --host=127.0.0.1 --port=8000 > storage/logs/install-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/up > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8000/login > /dev/null
+  test-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, pgsql]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: teg_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    env:
+      APP_ENV: testing
+      DB_CONNECTION: ${{ matrix.database }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: ${{ matrix.database == 'pgsql' && 'teg_test' || ':memory:' }}
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+    steps:
+      - uses: actions/checkout@v6
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, intl, pdo_sqlite, pdo_pgsql, zip, gd, bcmath
+          coverage: none
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: composer install --no-interaction --prefer-dist
+      - run: npm ci --no-audit --no-fund
+      - name: Prepare isolated test configuration
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+      - run: npm run lint:check
+      - run: npx vue-tsc --noEmit
+      - run: npm run build
+      - run: node --test tests/*.test.mjs
+      - run: python3 -B tests/Deployment/test_public_source_export.py
+      - run: php artisan test --filter='^(?!.*Tracker)'
+      - name: PostgreSQL concurrency
+        if: matrix.database == 'pgsql'
+        run: |
+          php artisan migrate --force
+          php tests/Deployment/participant-deactivation-race.php
+      - run: composer audit --locked
+      - run: npm audit --omit=dev --audit-level=high
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Create a disposable environment without integrations
+        run: |
+          python3 - <<'PY'
+          import base64, secrets
+          from pathlib import Path
+          values = [
+              'APP_NAME=OpenApproval', 'APP_ENV=production', 'APP_DEBUG=false',
+              'APP_URL=http://127.0.0.1:8000', 'APP_PORT=8000',
+              'APP_KEY=base64:' + base64.b64encode(secrets.token_bytes(32)).decode(),
+              'DB_DATABASE=openapproval_smoke', 'DB_USERNAME=openapproval_smoke',
+              'DB_PASSWORD=' + secrets.token_hex(24),
+              'TELEGRAM_TOKEN=', 'TELEGRAM_WEBHOOK_SECRET=', 'TELEGRAM_WEBHOOK_URL=',
+          ]
+          Path('.env').write_text('\n'.join(values) + '\n')
+          PY
+      - name: Build the production image and start PostgreSQL and workers
+        run: |
+          docker compose --progress plain build
+          docker compose up --no-build --wait --wait-timeout 360
+      - name: Verify readiness, login and compiled assets
+        run: |
+          curl --fail --silent http://127.0.0.1:8000/health/ready > /dev/null
+          python3 - <<'PY'
+          import re, urllib.request
+          with urllib.request.urlopen('http://127.0.0.1:8000/login') as response:
+              assert response.status == 200
+              html = response.read().decode()
+          assets = set(re.findall(r'(?:src|href)="(http://127\.0\.0\.1:8000/build/[^\"]+)"', html))
+          assert assets, 'Login must reference compiled assets'
+          for url in assets:
+              with urllib.request.urlopen(url) as response:
+                  assert response.status == 200 and response.read()
+          print(f'Login and {len(assets)} compiled assets passed')
+          PY
+          docker compose exec -T app php artisan db:seed --force
+          docker compose exec -T app php artisan admin:bootstrap --phone=998900000001 --name="Demo administrator" > /dev/null
+      - name: Show startup diagnostics on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - name: Remove disposable containers and volumes
+        if: always()
+        run: docker compose down --volumes --timeout 20

@@ -1,0 +1,25 @@
+# Production edge only. Never combine this override with rehearsal.
+# Start the edge profile only after the source connector has been stopped.
+services:
+  cloudflared:
+    image: ${CLOUDFLARED_IMAGE:?Set a verified cloudflared image digest}
+    profiles: [edge]
+    restart: unless-stopped
+    network_mode: host
+    user: "${CLOUDFLARED_UID:-1000}:${CLOUDFLARED_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [tunnel, --no-autoupdate, --metrics, "127.0.0.1:20241", run, --token-file, /run/secrets/cloudflare-token]
+    volumes:
+      - type: bind
+        source: ${CLOUDFLARED_TOKEN_FILE:?Set the protected token file path}
+        target: /run/secrets/cloudflare-token
+        read_only: true
+        bind:
+          create_host_path: false
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"

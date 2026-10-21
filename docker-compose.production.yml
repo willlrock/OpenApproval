@@ -1,0 +1,11 @@
+# Existing data volumes are external so Compose down cannot delete them.
+volumes:
+  app-private:
+    external: true
+    name: ${PRIVATE_VOLUME:?Set the verified private data volume}
+  app-storage:
+    external: true
+    name: ${PUBLIC_VOLUME:?Set the verified public data volume}
+  pgdata:
+    external: true
+    name: ${POSTGRES_VOLUME:?Set the production database volume}
